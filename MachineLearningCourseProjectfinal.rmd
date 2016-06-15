@@ -1,0 +1,96 @@
+---
+title: "Machine Learning Coursera CourseProject"
+author: "Michele martin"
+date: "8 juin 2016"
+output: html_document
+---
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The goal of the project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+The report is describing how the model is built and why, how cross validation was used, some thoughts the expected out of sample error. The prediction model is also used to predict 20 different test cases (file pml-testing).
+
+**Load and prepare DATA and build 1st Model : RF with pre-processing PCA**
+
+
+Read data and get rid of columns containing NA + 7 first ones (timestamp, users, etc) that are useless for our exercise.
+```{r ReadAndPrepare}
+training<-read.csv("pml-training.csv",sep=",",header=TRUE,na.strings = c("", "NA")) 
+testing<-read.csv("pml-testing.csv",sep=",",header=TRUE,na.strings = c("", "NA")) 
+i<-1:160
+usecol<-function(x){sum(is.na(x))}
+usec<-sapply(testing[,i],usecol)
+usec<-usec[usec == 0] #variables with NA values in testing are removed to avoid to build model on them with the training data
+#classe variable is replaced by problem_id in testing 
+usec<-usec[names(usec)%in%names(training)]
+training <- training[,c(names(usec),"classe")]
+testing <- testing[,c(names(usec),"problem_id")]
+training<-training[,-c(1:7)]
+testing<-testing[,-c(1:7)]
+
+```
+
+Subset data from training data to build and choose model 
+```{r TrainingTesting, warning=FALSE}
+set.seed(100262)
+library(caret)
+library(randomForest)
+inTrain = createDataPartition(training$classe, p = 0.6, list = FALSE)
+training = training[inTrain,]
+newtesting = training[-inTrain,]
+```
+
+Let's see if the number of variables could be reduced 
+
+```{r Correlation, warning=FALSE}
+cortable<- cor(training[, -53])
+library(corrplot)
+corrplot(cortable, order = "FPC", method = "square")
+
+
+```
+
+There is a limited correlation and  as the number of variables is quite high, let's pre-process the data with a PC Analysis, build the RF model and *cross-validate* with some data out of the training sample.
+```{r PcaAndRf}
+prep<-preProcess(x=training[,-53],method="pca",thresh=0.8,na.remove=TRUE)#construct PCA model-new variables 
+trainingpca<-predict(object=prep,newdata= training[,-53]) #calculate the new values for the new variables in training
+testingpca<-predict(object=prep,newdata= newtesting[,-53]) #idem for testing
+modelpcarf<-randomForest(training$classe~.,trainingpca)
+fitpcarf<-predict(modelpcarf,testingpca,type="class")
+modelpcarf
+confusionMatrix(reference=newtesting$classe,data=fitpcarf)#test accuracy on testingdata with new var
+
+```
+
+**Compare briefly with other models**
+
+
+Let's try an  lda model w/o pre-processing to compare with this  model and see if it is as efficient, see if PCA pre-processing has brought an improvement versus a rf model without pre-processing
+
+
+```{r OtherModels}
+modellda<-train(training$classe~., method="lda",data=training[,-53])
+fitlda<-predict(modellda,newtesting)
+confusionMatrix(data=fitlda,reference=newtesting$classe)
+modelrf = randomForest(training[,-53], training[,53])
+fitrf<-predict(modelrf, newtesting)
+confusionMatrix(data=fitrf,reference=newtesting$classe)
+```
+
+**Prediction**
+
+
+The model obtained with lda seems less performant so we reject it anyway.
+The model obtained without pre-processing and random Forest method seems as efficient as the 1st one, they give results that are 90% the same on the set of 20 observations. T
+Finally we choose the first one as final predictions as there could be overfitting without the PCA pre-processing.
+
+```{r Predict}
+
+prf<-predict(modelrf,testing[,-53])
+testingpca<-predict(object=prep,newdata= testing[,-53]) 
+ppcarf<-predict(modelpcarf,testingpca)
+id<-prf!=ppcarf;ppcarf[id];prf[id]
+ppcarf
+```
+
+ 
